@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!--
+    maximum-scale=1.0 + user-scalable=no: disables pinch-zoom and double-tap zoom
+    at the browser/OS level on most mobile browsers.
+    width=device-width + initial-scale=1.0: ensures a 1:1 CSS-pixel mapping so
+    "100vh" is the exact physical viewport height.
+  -->
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no"
+  />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Spring Day – Horizontal Panorama</title>
+
+  <style>
+    /* ── Reset & base ───────────────────────────────────────────────────── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    /*
+      Lock the root elements to exactly one viewport tall.
+      overflow: hidden prevents ANY scroll on the document itself –
+      only our inner container will scroll, and only horizontally.
+    */
+    html {
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      /* Prevent rubber-band / overscroll at the document level */
+      overscroll-behavior: none;
+      touch-action: pan-x;          /* tell the browser we only want horizontal panning */
+    }
+
+    body {
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      background: #000;             /* letterbox colour if anything bleeds */
+      touch-action: pan-x;
+    }
+
+    /* ── Scroll container ───────────────────────────────────────────────── */
+    #pan-container {
+      /*
+        Exactly one screen tall – never more, never less.
+        width: 100% keeps it within the viewport horizontally until the image
+        forces natural overflow via its intrinsic width.
+      */
+      height: 100vh;                /* = 100% of the viewport height */
+      width: 100%;
+
+      overflow-x: auto;             /* horizontal scroll: YES  */
+      overflow-y: hidden;           /* vertical   scroll: NO   */
+      overscroll-behavior-x: contain; /* prevent horizontal rubber-band from triggering back-navigation */
+      overscroll-behavior-y: none;
+
+      touch-action: pan-x;          /* pointer events: only horizontal pan */
+
+      /* Momentum scrolling on iOS */
+      -webkit-overflow-scrolling: touch;
+
+      /* Hide scrollbar visually on all browsers while keeping it functional */
+      scrollbar-width: none;        /* Firefox */
+      -ms-overflow-style: none;     /* IE / Edge (legacy) */
+    }
+    #pan-container::-webkit-scrollbar {
+      display: none;                /* Chrome / Safari / WebKit */
+    }
+
+    /* ── The image ──────────────────────────────────────────────────────── */
+    #panorama {
+      /*
+        height: 100vh  → fills the viewport height exactly.
+        width: auto    → browser calculates width from the natural aspect ratio,
+                         which will be wider than the viewport on a portrait phone
+                         and thus make the container scrollable.
+      */
+      display: block;
+      height: 100vh;
+      width: auto;
+
+      /*
+        Prevent the browser from down-sampling for "fit" and keep pixels crisp.
+        image-rendering: high-quality is the modern standard;
+        the webkit/moz prefixes cover older engines.
+      */
+      image-rendering: -webkit-optimize-contrast; /* Safari ≤ 15 */
+      image-rendering: high-quality;
+
+      /* No dragging – we handle touch panning through native CSS overflow */
+      -webkit-user-drag: none;
+      user-drag: none;
+      pointer-events: none;         /* let touch events fall through to the container */
+
+      /* Prevent tap-highlight flashes on iOS */
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── Optional: subtle "swipe" hint that fades out on first touch ────── */
+    #swipe-hint {
+      position: fixed;
+      bottom: env(safe-area-inset-bottom, 24px);
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 18px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.45);
+      color: rgba(255, 255, 255, 0.90);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      letter-spacing: 0.03em;
+      pointer-events: none;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      opacity: 1;
+      transition: opacity 0.6s ease;
+      z-index: 10;
+    }
+    #swipe-hint.hidden {
+      opacity: 0;
+    }
+    #swipe-hint svg {
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="pan-container">
+    <!--
+      Replace "Spring_day2.png" with the correct relative (or absolute) path
+      to the image when hosting on GitHub Pages or locally.
+    -->
+    <img
+      id="panorama"
+      src="Spring_day2.png"
+      alt="Spring Day panorama – a cherry blossom tree in a lush valley"
+      draggable="false"
+      decoding="async"
+    />
+  </div>
+
+  <!-- Swipe hint badge -->
+  <div id="swipe-hint" aria-hidden="true">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="15 18 9 12 15 6"/>
+      <polyline points="9 18 3 12 9 6" opacity=".4"/>
+    </svg>
+    Swipe to pan
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="9 18 15 12 9 6"/>
+      <polyline points="15 18 21 12 15 6" opacity=".4"/>
+    </svg>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      /* ── 1. Dismiss the swipe hint on first touch ─────────────────────── */
+      const hint = document.getElementById('swipe-hint');
+      const container = document.getElementById('pan-container');
+
+      function dismissHint () {
+        hint.classList.add('hidden');
+        container.removeEventListener('touchstart', dismissHint);
+      }
+      container.addEventListener('touchstart', dismissHint, { passive: true });
+
+      /* Auto-dismiss after 3 s even without interaction */
+      setTimeout(dismissHint, 3000);
+
+      /* ── 2. Block vertical scroll & pinch-zoom via Touch Events API ────── */
+      /*
+        Even with CSS touch-action: pan-x, some older WebKit builds still allow
+        a small amount of vertical bounce. We intercept touchmove here and call
+        preventDefault() for any gesture that is more vertical than horizontal,
+        and for any multi-touch gesture (= pinch-zoom).
+      */
+      let startX = 0;
+      let startY = 0;
+
+      document.addEventListener('touchstart', function (e) {
+        if (e.touches.length === 1) {
+          startX = e.touches[0].clientX;
+          startY = e.touches[0].clientY;
+        }
+      }, { passive: true });
+
+      document.addEventListener('touchmove', function (e) {
+        /* Block pinch-zoom (2+ fingers) unconditionally */
+        if (e.touches.length > 1) {
+          e.preventDefault();
+          return;
+        }
+
+        const dx = Math.abs(e.touches[0].clientX - startX);
+        const dy = Math.abs(e.touches[0].clientY - startY);
+
+        /*
+          Block the move if the gesture is predominantly vertical.
+          A dead-zone of 5 px lets diagonal starts be decided cleanly.
+        */
+        if (dy > dx) {
+          e.preventDefault();
+        }
+      }, { passive: false });   /* passive: false required to call preventDefault */
+
+      /* Block double-tap zoom by tracking tap timing */
+      let lastTap = 0;
+      document.addEventListener('touchend', function (e) {
+        const now = Date.now();
+        if (now - lastTap < 300) {
+          e.preventDefault();       /* cancel the double-tap zoom */
+        }
+        lastTap = now;
+      }, { passive: false });
+
+      /* ── 3. Prevent context menu on long-press (image save prompt) ─────── */
+      document.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+      });
+
+    })();
+  </script>
+
+</body>
+</html>
