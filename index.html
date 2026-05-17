@@ -105,6 +105,46 @@
       -webkit-tap-highlight-color: transparent;
     }
 
+    /* ── Landscape mode: fill the entire screen, no scrolling ─────────────
+       The image is wider than a portrait phone's viewport, so in landscape
+       the viewport is also wide — we stretch/cover the image to fill 100 vw × 100 vh.
+       object-fit: cover fills without distortion; any overflow is evenly clipped.
+    ─────────────────────────────────────────────────────────────────────── */
+    @media (orientation: landscape) {
+      html, body {
+        touch-action: none;           /* no panning needed in landscape */
+      }
+
+      #pan-container {
+        width: 100vw;
+        height: 100vh;
+        overflow-x: hidden;           /* no horizontal scroll in landscape */
+        overflow-y: hidden;
+        touch-action: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      #panorama {
+        width: 100vw;
+        height: 100vh;
+        object-fit: cover;            /* fills every pixel; aspect ratio preserved visually */
+        object-position: center center;
+      }
+
+      /* Hide swipe hint in landscape – no panning needed */
+      #swipe-hint {
+        display: none;
+      }
+    }
+
+    /* ── Smooth transition between orientations ─────────────────────────── */
+    #pan-container,
+    #panorama {
+      transition: width 0.35s ease, height 0.35s ease;
+    }
+
     /* ── Optional: subtle "swipe" hint that fades out on first touch ────── */
     #swipe-hint {
       position: fixed;
@@ -186,13 +226,17 @@
 
       /* ── 2. Block vertical scroll & pinch-zoom via Touch Events API ────── */
       /*
-        Even with CSS touch-action: pan-x, some older WebKit builds still allow
-        a small amount of vertical bounce. We intercept touchmove here and call
-        preventDefault() for any gesture that is more vertical than horizontal,
-        and for any multi-touch gesture (= pinch-zoom).
+        Portrait : allow horizontal pan only – block vertical moves & pinch.
+        Landscape: block ALL touch movement (image fills screen; nothing to scroll).
+        We re-evaluate on every touchmove so orientation changes mid-gesture
+        are handled correctly.
       */
       let startX = 0;
       let startY = 0;
+
+      function isLandscape () {
+        return window.matchMedia('(orientation: landscape)').matches;
+      }
 
       document.addEventListener('touchstart', function (e) {
         if (e.touches.length === 1) {
@@ -202,23 +246,41 @@
       }, { passive: true });
 
       document.addEventListener('touchmove', function (e) {
-        /* Block pinch-zoom (2+ fingers) unconditionally */
+        /* Block pinch-zoom (2+ fingers) in both orientations */
         if (e.touches.length > 1) {
           e.preventDefault();
           return;
         }
 
+        /* In landscape the image fills the screen – block all movement */
+        if (isLandscape()) {
+          e.preventDefault();
+          return;
+        }
+
+        /* Portrait: block vertical-dominant gestures only */
         const dx = Math.abs(e.touches[0].clientX - startX);
         const dy = Math.abs(e.touches[0].clientY - startY);
-
-        /*
-          Block the move if the gesture is predominantly vertical.
-          A dead-zone of 5 px lets diagonal starts be decided cleanly.
-        */
         if (dy > dx) {
           e.preventDefault();
         }
       }, { passive: false });   /* passive: false required to call preventDefault */
+
+      /* Reset pan-container scroll position when rotating to landscape
+         so the image is always centred when entering landscape mode */
+      window.addEventListener('orientationchange', function () {
+        setTimeout(function () {
+          if (isLandscape()) {
+            container.scrollLeft = 0;
+          }
+        }, 100);   /* small delay lets the browser finish resizing */
+      });
+
+      screen.orientation && screen.orientation.addEventListener('change', function () {
+        setTimeout(function () {
+          if (isLandscape()) container.scrollLeft = 0;
+        }, 100);
+      });
 
       /* Block double-tap zoom by tracking tap timing */
       let lastTap = 0;
