@@ -2,12 +2,6 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <!--
-    maximum-scale=1.0 + user-scalable=no: disables pinch-zoom and double-tap zoom
-    at the browser/OS level on most mobile browsers.
-    width=device-width + initial-scale=1.0: ensures a 1:1 CSS-pixel mapping so
-    "100vh" is the exact physical viewport height.
-  -->
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no"
@@ -15,28 +9,21 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>Spring Day – Horizontal Panorama</title>
+  <title>Spring Day – Panorama Viewer</title>
 
   <style>
-    /* ── Reset & base ───────────────────────────────────────────────────── */
     *, *::before, *::after {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
     }
 
-    /*
-      Lock the root elements to exactly one viewport tall.
-      overflow: hidden prevents ANY scroll on the document itself –
-      only our inner container will scroll, and only horizontally.
-    */
     html {
       height: 100%;
       width: 100%;
       overflow: hidden;
-      /* Prevent rubber-band / overscroll at the document level */
       overscroll-behavior: none;
-      touch-action: pan-x;          /* tell the browser we only want horizontal panning */
+      touch-action: none;
     }
 
     body {
@@ -44,108 +31,79 @@
       width: 100%;
       overflow: hidden;
       overscroll-behavior: none;
-      background: #000;             /* letterbox colour if anything bleeds */
-      touch-action: pan-x;
+      background: #000;
+      touch-action: none;
     }
 
-    /* ── Scroll container ───────────────────────────────────────────────── */
+    /* ── Scroll container ─────────────────────────────────────────────── */
+    /*
+      overflow: hidden — we handle ALL panning and zooming via CSS transforms.
+      Native scroll is removed so pinch-zoom and single-finger drag can both
+      be intercepted cleanly in one unified touch-handler.
+    */
     #pan-container {
-      /*
-        Exactly one screen tall – never more, never less.
-        width: 100% keeps it within the viewport horizontally until the image
-        forces natural overflow via its intrinsic width.
-      */
-      height: 100vh;                /* = 100% of the viewport height */
-      width: 100%;
-
-      overflow-x: auto;             /* horizontal scroll: YES  */
-      overflow-y: hidden;           /* vertical   scroll: NO   */
-      overscroll-behavior-x: contain; /* prevent horizontal rubber-band from triggering back-navigation */
-      overscroll-behavior-y: none;
-
-      touch-action: pan-x;          /* pointer events: only horizontal pan */
-
-      /* Momentum scrolling on iOS */
-      -webkit-overflow-scrolling: touch;
-
-      /* Hide scrollbar visually on all browsers while keeping it functional */
-      scrollbar-width: none;        /* Firefox */
-      -ms-overflow-style: none;     /* IE / Edge (legacy) */
-    }
-    #pan-container::-webkit-scrollbar {
-      display: none;                /* Chrome / Safari / WebKit */
+      position: relative;
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+      touch-action: none;
+      cursor: grab;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
-    /* ── The image ──────────────────────────────────────────────────────── */
+    #pan-container.grabbing {
+      cursor: grabbing;
+    }
+
+    /* ── The image ────────────────────────────────────────────────────── */
     #panorama {
-      /*
-        height: 100vh  → fills the viewport height exactly.
-        width: auto    → browser calculates width from the natural aspect ratio,
-                         which will be wider than the viewport on a portrait phone
-                         and thus make the container scrollable.
-      */
       display: block;
       height: 100vh;
       width: auto;
 
       /*
-        Prevent the browser from down-sampling for "fit" and keep pixels crisp.
-        image-rendering: high-quality is the modern standard;
-        the webkit/moz prefixes cover older engines.
+        transform-origin: 0 0 makes the transform math straightforward:
+        translate(tx, ty) scale(s) means the top-left pixel of the image
+        sits at (tx, ty) in viewport coordinates, scaled by s.
       */
-      image-rendering: -webkit-optimize-contrast; /* Safari ≤ 15 */
+      transform-origin: 0 0;
+      will-change: transform;
+
+      image-rendering: -webkit-optimize-contrast;
       image-rendering: high-quality;
 
-      /* No dragging – we handle touch panning through native CSS overflow */
       -webkit-user-drag: none;
       user-drag: none;
-      pointer-events: none;         /* let touch events fall through to the container */
-
-      /* Prevent tap-highlight flashes on iOS */
+      pointer-events: none;           /* container receives all touch events */
       -webkit-tap-highlight-color: transparent;
     }
 
-    /* ── Landscape mode: fill the entire screen, no scrolling ─────────────
-       The image is wider than a portrait phone's viewport, so in landscape
-       the viewport is also wide — we stretch/cover the image to fill 100 vw × 100 vh.
-       object-fit: cover fills without distortion; any overflow is evenly clipped.
-    ─────────────────────────────────────────────────────────────────────── */
-    @media (orientation: landscape) {
-      html, body {
-        touch-action: none;           /* no panning needed in landscape */
-      }
-
-      #pan-container {
-        width: 100vw;
-        height: 100vh;
-        overflow-x: hidden;           /* no horizontal scroll in landscape */
-        overflow-y: hidden;
-        touch-action: none;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      #panorama {
-        width: 100vw;
-        height: 100vh;
-        object-fit: cover;            /* fills every pixel; aspect ratio preserved visually */
-        object-position: center top;
-      }
-
-      /* Hide swipe hint in landscape – no panning needed */
-      #swipe-hint {
-        display: none;
-      }
+    /* ── Zoom-level badge ─────────────────────────────────────────────── */
+    #zoom-badge {
+      position: fixed;
+      top: env(safe-area-inset-top, 20px);
+      right: 20px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.50);
+      color: rgba(255, 255, 255, 0.92);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.04em;
+      pointer-events: none;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      z-index: 20;
+    }
+    #zoom-badge.visible {
+      opacity: 1;
     }
 
-    /* ── Smooth transition between orientations ─────────────────────────── */
-    #pan-container,
-    #panorama {
-      transition: width 0.35s ease, height 0.35s ease;
-    }
-
-    /* ── Optional: subtle "swipe" hint that fades out on first touch ────── */
+    /* ── Swipe / pinch hint ───────────────────────────────────────────── */
     #swipe-hint {
       position: fixed;
       bottom: env(safe-area-inset-bottom, 24px);
@@ -167,6 +125,7 @@
       opacity: 1;
       transition: opacity 0.6s ease;
       z-index: 10;
+      white-space: nowrap;
     }
     #swipe-hint.hidden {
       opacity: 0;
@@ -179,10 +138,6 @@
 <body>
 
   <div id="pan-container">
-    <!--
-      Replace "Spring_day2.png" with the correct relative (or absolute) path
-      to the image when hosting on GitHub Pages or locally.
-    -->
     <img
       id="panorama"
       src="Spring_day2.png"
@@ -192,15 +147,18 @@
     />
   </div>
 
-  <!-- Swipe hint badge -->
+  <!-- Zoom level indicator -->
+  <div id="zoom-badge" aria-hidden="true">1.0×</div>
+
+  <!-- Hint badge -->
   <div id="swipe-hint" aria-hidden="true">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <polyline points="15 18 9 12 15 6"/>
       <polyline points="9 18 3 12 9 6" opacity=".4"/>
     </svg>
-    Swipe to pan
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+    Swipe to pan · Pinch to zoom
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <polyline points="9 18 15 12 9 6"/>
       <polyline points="15 18 21 12 15 6" opacity=".4"/>
@@ -211,91 +169,271 @@
     (function () {
       'use strict';
 
-      /* ── 1. Dismiss the swipe hint on first touch ─────────────────────── */
-      const hint = document.getElementById('swipe-hint');
       const container = document.getElementById('pan-container');
+      const img       = document.getElementById('panorama');
+      const badge     = document.getElementById('zoom-badge');
+      const hint      = document.getElementById('swipe-hint');
 
+      /* ── Transform state ──────────────────────────────────────────────
+         We represent the view as:
+           screen_pos = translate(tx, ty) · scale(scale) · image_pos
+         i.e. the top-left of the image sits at (tx, ty) in viewport px,
+         and the image is drawn at `scale` times its natural rendered size.
+      ──────────────────────────────────────────────────────────────────── */
+      let scale   = 1;
+      let tx      = 0;
+      let ty      = 0;
+
+      const MIN_SCALE = 1;
+      const MAX_SCALE = 5;
+
+      /* Rendered image size at scale = 1 (set once image is ready) */
+      let imgW = 0;
+      let imgH = 0;
+
+      function readImageSize () {
+        imgW = img.offsetWidth;
+        imgH = img.offsetHeight;
+      }
+
+      /* ── Helpers ──────────────────────────────────────────────────── */
+      function clamp (v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+      function pinchDist (t1, t2) {
+        const dx = t2.clientX - t1.clientX;
+        const dy = t2.clientY - t1.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+
+      function pinchMid (t1, t2) {
+        return {
+          x: (t1.clientX + t2.clientX) / 2,
+          y: (t1.clientY + t2.clientY) / 2
+        };
+      }
+
+      /* ── Constrain translation so image always covers the viewport ── */
+      function constrain () {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const sw = imgW * scale;   // scaled image width
+        const sh = imgH * scale;   // scaled image height
+
+        /* Horizontal */
+        if (sw >= vw) {
+          tx = clamp(tx, vw - sw, 0);
+        } else {
+          tx = (vw - sw) / 2;      /* centre if narrower than viewport */
+        }
+
+        /* Vertical */
+        if (sh >= vh) {
+          ty = clamp(ty, vh - sh, 0);
+        } else {
+          ty = (vh - sh) / 2;      /* centre if shorter than viewport */
+        }
+      }
+
+      /* ── Apply transform to the DOM ───────────────────────────────── */
+      let badgeTimer = null;
+
+      function applyTransform (animated) {
+        constrain();
+
+        img.style.transition = animated ? 'transform 0.28s cubic-bezier(0.25,0.46,0.45,0.94)' : '';
+        img.style.transform  = `translate(${tx}px,${ty}px) scale(${scale})`;
+
+        /* Update zoom badge */
+        badge.textContent = scale.toFixed(1) + '×';
+        badge.classList.add('visible');
+        clearTimeout(badgeTimer);
+        badgeTimer = setTimeout(() => badge.classList.remove('visible'), 1200);
+      }
+
+      /* ── Initialise once image dimensions are known ───────────────── */
+      function init () {
+        readImageSize();
+        constrain();
+        img.style.transition = '';
+        img.style.transform  = `translate(${tx}px,${ty}px) scale(${scale})`;
+      }
+
+      if (img.complete && img.naturalWidth) {
+        /* Image already in cache */
+        init();
+      } else {
+        img.addEventListener('load', init, { once: true });
+      }
+
+      window.addEventListener('resize', () => { readImageSize(); applyTransform(false); });
+
+      /* ── Touch state ──────────────────────────────────────────────── */
+      let panStartX  = 0;
+      let panStartY  = 0;
+
+      /* Pinch */
+      let pinchActive  = false;
+      let lastDist     = 0;
+      let lastMidX     = 0;
+      let lastMidY     = 0;
+
+      /* Double-tap */
+      let lastTapTime  = 0;
+      let lastTapX     = 0;
+      let lastTapY     = 0;
+
+      /* ── Dismiss hint ─────────────────────────────────────────────── */
       function dismissHint () {
         hint.classList.add('hidden');
-        container.removeEventListener('touchstart', dismissHint);
       }
-      container.addEventListener('touchstart', dismissHint, { passive: true });
+      setTimeout(dismissHint, 3500);
 
-      /* Auto-dismiss after 3 s even without interaction */
-      setTimeout(dismissHint, 3000);
+      /* ── touchstart ───────────────────────────────────────────────── */
+      container.addEventListener('touchstart', function (e) {
+        e.preventDefault();
+        readImageSize();
+        dismissHint();
+        container.classList.add('grabbing');
 
-      /* ── 2. Block vertical scroll & pinch-zoom via Touch Events API ────── */
-      /*
-        Portrait : allow horizontal pan only – block vertical moves & pinch.
-        Landscape: block ALL touch movement (image fills screen; nothing to scroll).
-        We re-evaluate on every touchmove so orientation changes mid-gesture
-        are handled correctly.
-      */
-      let startX = 0;
-      let startY = 0;
+        const ts = e.touches;
 
-      function isLandscape () {
-        return window.matchMedia('(orientation: landscape)').matches;
-      }
+        if (ts.length === 1) {
+          /* ── Double-tap detection ─────────────────────────────────── */
+          const now  = Date.now();
+          const tapX = ts[0].clientX;
+          const tapY = ts[0].clientY;
 
-      document.addEventListener('touchstart', function (e) {
-        if (e.touches.length === 1) {
-          startX = e.touches[0].clientX;
-          startY = e.touches[0].clientY;
-        }
-      }, { passive: true });
-
-      document.addEventListener('touchmove', function (e) {
-        /* Block pinch-zoom (2+ fingers) in both orientations */
-        if (e.touches.length > 1) {
-          e.preventDefault();
-          return;
-        }
-
-        /* In landscape the image fills the screen – block all movement */
-        if (isLandscape()) {
-          e.preventDefault();
-          return;
-        }
-
-        /* Portrait: block vertical-dominant gestures only */
-        const dx = Math.abs(e.touches[0].clientX - startX);
-        const dy = Math.abs(e.touches[0].clientY - startY);
-        if (dy > dx) {
-          e.preventDefault();
-        }
-      }, { passive: false });   /* passive: false required to call preventDefault */
-
-      /* Reset pan-container scroll position when rotating to landscape
-         so the image is always centred when entering landscape mode */
-      window.addEventListener('orientationchange', function () {
-        setTimeout(function () {
-          if (isLandscape()) {
-            container.scrollLeft = 0;
+          if (
+            now - lastTapTime < 280 &&
+            Math.abs(tapX - lastTapX) < 40 &&
+            Math.abs(tapY - lastTapY) < 40
+          ) {
+            /* Double-tap → toggle between 1× and 2.5× */
+            if (scale > 1.05) {
+              /* Zoom out to 1× */
+              scale = 1;
+              tx    = 0;
+              ty    = 0;
+            } else {
+              /* Zoom in 2.5× centred on the tap point */
+              const newScale = 2.5;
+              const imgPx   = (tapX - tx) / scale;
+              const imgPy   = (tapY - ty) / scale;
+              scale = newScale;
+              tx    = tapX - imgPx * newScale;
+              ty    = tapY - imgPy * newScale;
+            }
+            applyTransform(true);
+            lastTapTime = 0;           /* reset so triple-tap doesn't re-fire */
+            pinchActive = false;
+            return;
           }
-        }, 100);   /* small delay lets the browser finish resizing */
-      });
 
-      screen.orientation && screen.orientation.addEventListener('change', function () {
-        setTimeout(function () {
-          if (isLandscape()) container.scrollLeft = 0;
-        }, 100);
-      });
+          lastTapTime = now;
+          lastTapX    = tapX;
+          lastTapY    = tapY;
 
-      /* Block double-tap zoom by tracking tap timing */
-      let lastTap = 0;
-      document.addEventListener('touchend', function (e) {
-        const now = Date.now();
-        if (now - lastTap < 300) {
-          e.preventDefault();       /* cancel the double-tap zoom */
+          panStartX = ts[0].clientX;
+          panStartY = ts[0].clientY;
+          pinchActive = false;
+
+        } else if (ts.length >= 2) {
+          /* ── Pinch-start ──────────────────────────────────────────── */
+          pinchActive = true;
+          lastDist    = pinchDist(ts[0], ts[1]);
+          const mid   = pinchMid(ts[0], ts[1]);
+          lastMidX    = mid.x;
+          lastMidY    = mid.y;
+          lastTapTime = 0;             /* cancel any pending double-tap */
         }
-        lastTap = now;
       }, { passive: false });
 
-      /* ── 3. Prevent context menu on long-press (image save prompt) ─────── */
-      document.addEventListener('contextmenu', function (e) {
+      /* ── touchmove ────────────────────────────────────────────────── */
+      container.addEventListener('touchmove', function (e) {
         e.preventDefault();
-      });
+        const ts = e.touches;
+
+        if (ts.length === 1 && !pinchActive) {
+          /* ── Single-finger pan ────────────────────────────────────── */
+          const dx = ts[0].clientX - panStartX;
+          const dy = ts[0].clientY - panStartY;
+          tx += dx;
+          ty += dy;
+          panStartX = ts[0].clientX;
+          panStartY = ts[0].clientY;
+          applyTransform(false);
+
+        } else if (ts.length >= 2) {
+          /* ── Pinch: zoom + simultaneous pan ──────────────────────── */
+          const dist = pinchDist(ts[0], ts[1]);
+          const mid  = pinchMid(ts[0], ts[1]);
+
+          const rawRatio = dist / lastDist;
+          const newScale = clamp(scale * rawRatio, MIN_SCALE, MAX_SCALE);
+          const trueRatio = newScale / scale;   /* actual ratio after clamping */
+
+          /*
+            Keep the pinch midpoint anchored:
+            The image pixel under the midpoint before the gesture must stay
+            under the midpoint after scaling.
+          */
+          const imgPx = (mid.x - tx) / scale;
+          const imgPy = (mid.y - ty) / scale;
+
+          /* Add any pan delta from midpoint movement */
+          const panDx = mid.x - lastMidX;
+          const panDy = mid.y - lastMidY;
+
+          scale = newScale;
+          tx    = mid.x - imgPx * scale + panDx;
+          ty    = mid.y - imgPy * scale + panDy;
+
+          lastDist = dist;
+          lastMidX = mid.x;
+          lastMidY = mid.y;
+
+          applyTransform(false);
+        }
+      }, { passive: false });
+
+      /* ── touchend / touchcancel ───────────────────────────────────── */
+      function onTouchEnd (e) {
+        if (e.touches.length === 0) {
+          container.classList.remove('grabbing');
+          pinchActive = false;
+
+          /* Snap back to minScale if somehow undershot */
+          if (scale < MIN_SCALE) {
+            scale = MIN_SCALE; tx = 0; ty = 0;
+            applyTransform(true);
+          }
+        } else if (e.touches.length === 1) {
+          /*
+            One finger lifted during a pinch → seamlessly continue as pan.
+            Reset pan origin to avoid a jump.
+          */
+          pinchActive = false;
+          panStartX   = e.touches[0].clientX;
+          panStartY   = e.touches[0].clientY;
+        }
+      }
+      container.addEventListener('touchend',    onTouchEnd, { passive: false });
+      container.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
+      /* ── Orientation change: keep image in view ───────────────────── */
+      function onOrientationChange () {
+        setTimeout(function () {
+          readImageSize();
+          /* Don't reset zoom; just re-constrain so image stays in frame */
+          applyTransform(true);
+        }, 120);
+      }
+      window.addEventListener('orientationchange', onOrientationChange);
+      screen.orientation &&
+        screen.orientation.addEventListener('change', onOrientationChange);
+
+      /* ── Block context menu (long-press image-save prompt) ─────────── */
+      document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
     })();
   </script>
